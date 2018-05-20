@@ -1,0 +1,130 @@
+---
+title: "Case Study: Clustering"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+### Dataset: IRIS
+* * *
+
+* Load the dataset
+
+```{r}
+data(iris)
+summary(iris)
+```
+* Remove the values from the **species** columns
+```{r}
+iris_species_unk = iris
+iris_species_unk$Species = NULL
+```
+
+### K-Means
+* * *
+
+* The ``nstart`` allows to run different random starting assigments and to select the one with the lowest within cluster variation
+* Ensure reproducibility by setting the seed
+* Assume that *K* = 3
+
+```{r}
+# kmeans(x, centers, ...)
+set.seed(20)
+km_clusters = kmeans(iris_species_unk[], centers = 3, nstart = 20)
+str(km_clusters)
+```
+
+* Compare the clusters with the species
+```{r}
+table(km_clusters$cluster, iris$Species)
+```
+
+* Plot data samples in clusters
+```{r}
+plot(iris_species_unk$Sepal.Length, iris_species_unk$Sepal.Width, col=km_clusters$cluster, xlab = 'Sepal Lenght', ylab = 'Sepal Width')
+points(km_clusters$centers[,c('Sepal.Length', 'Sepal.Width')], col=1:3, pch=8, cex=2)
+```
+```{r}
+library(ggplot2)
+irisClusters = as.factor(km_clusters$cluster)
+ggplot(iris_species_unk, aes(Petal.Length, Petal.Width, color = irisClusters)) + geom_point()
+```
+
+#### Optimal **K** computation
+Model selection criteria:
+
+* **AIC** (Akaike Information Criterion)
+* **BIC** (Bayesian Information Criterion)
+
+```{r}
+aic_bic = function(fit){
+  # Number of features #
+  m = ncol(fit$centers)
+  # Number of observations #
+  n = length(fit$cluster)
+  # Number of clusters, i.e. k #
+  k = nrow(fit$centers)
+  # Total within-cluster sum of squares
+  D = fit$tot.withinss
+  return(c(D + 2*m*k, D + log(n)*m*k))
+}
+```
+* Which are the **AIC** and **BIC** values?
+```{r}
+values = aic_bic(km_clusters)
+names(values) = c('AIC', 'BIC')
+print(values)
+```
+* Pick the model with the lowest **BIC** or **AIC**
+* Check values of **K** between 3 to 40
+```{r}
+#cat("K", "\t", "AIC", "\t\t", "BIC", "\n")
+lowest_bic = lowest_aic = 1000
+best_k_bic = best_k_aic = 0
+for (k in 3:40) {
+  aic_bic_k = aic_bic(kmeans(iris_species_unk, k))
+  current_aic = aic_bic_k[1]
+  current_bic = aic_bic_k[2]
+  if (current_aic < lowest_aic) {
+    lowest_aic = current_aic
+    best_k_aic = k
+  }
+  if (current_bic < lowest_bic) {
+    lowest_bic = current_bic
+    best_k_bic = k
+  }
+  # cat(k, '\t', bic_aic_k[1], '\t', bic_aic_k[2], '\n')
+}
+```
+
+```{r}
+cat('Best K according to AIC: ', best_k_aic, '-- BIC: ', lowest_aic, '\n')
+```
+```{r}
+cat('Best K according to BIC: ', best_k_bic, '-- BIC: ', lowest_bic, '\n')
+```
+
+##### Activity:
+Apply the same analysis as before to the following dataset:
+
+* ``install.packages('rattle.data')``
+* ``data("wine", package = 'rattle.data')``
+
+### Hierarchical Clustering
+* * *
+* Take a sample from the IRIS dataset:
+```{r}
+idx = sample(1:dim(iris)[1], 40)
+iris_sample = iris[idx,]
+iris_sample$Species = NULL
+```
+* Create the clusters
+```{r}
+hc_clusters = hclust(dist(iris_sample), method="ave")
+str(hc_clusters)
+```
+* Plot the result
+```{r}
+plot(hc_clusters, hang = -1, labels=iris$Species[idx])
+```

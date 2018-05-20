@@ -1,0 +1,190 @@
+---
+title: "Case Study: Link Analysis"
+output:
+  html_document:
+    df_print: paged
+    #code_folding: hide
+  pdf_document: default
+---
+
+```{r, echo=FALSE}
+rm(list=ls())
+```
+___
+### Objectives
+* Explore a dataset on flight routes
+* Plot the graph that shows the links between the airports (how the airports are connected)
+* Analize differtent link analysis properties such as outdegree, betweenness and PageRank
+
+### Flight Routes Dataset
+* Download from: ```ir.inf.usi.ch/da-datasets/flights.zip``` and load it
+```{r, echo=TRUE}
+airports = read.csv("airports.dat", header=T)
+routes = read.csv("routes.dat", header=T)
+```
+* Explore the data:
+```{r}
+nrow(airports)
+head(airports)
+summary(airports)
+
+nrow(routes)
+head(routes)
+summary(routes)
+```
+* Select only airports located in United_Kingdom
+```{r}
+airports_United_Kingdom = airports[airports$Country == 'United Kingdom',]
+```
+* Filter out airports that don't have a specified *IATA* code
+* Keep only the **City**, **IATA**, **Latitude**, **Longitude** columns in ``airports_United_Kingdom``
+```{r}
+airports_United_Kingdom = airports_United_Kingdom[airports_United_Kingdom$IATA != '', 
+                                c('City', 'IATA', 'Latitude', 'Longitude')]
+```
+* Keep only the Italian routes
+```{r}
+iata_italian_codes = airports_United_Kingdom$IATA
+routes_United_Kingdom <- routes[(routes$SourceAirport %in% iata_italian_codes) & 
+                        (routes$DestinationAirport %in% iata_italian_codes),
+                       c('SourceAirport','DestinationAirport')]
+```
+* How many airports there are in United_Kingdom?
+```{r}
+nrow(airports_United_Kingdom)
+```
+How many routes there are in United_Kingdom?
+```{r}
+nrow(routes_United_Kingdom)
+```
+###Plot the Flight Routes in United_Kingdom
+* Associate the geographical coordinates of the airports of departure and arrival for each flying route
+* Create a function to get the coordinates of an airport, given its **IATA** code:
+* Function name: ```getCoordinates_United_Kingdom```
+* Takes one argument: ```iata_codes```
+* Gets the ```Longitude```, ```Latitude``` of the given ```iata_codes``` using ```airports_United_Kingdom``` variable
+* Returns a data frame that contains the ```Longitude```, ```Latitude``` of the given iata
+
+```{r}
+getCoordinates_United_Kingdom = function(iata_code) {
+  codefilter = airports_United_Kingdom$IATA == iata_code
+  Longitude = airports_United_Kingdom[codefilter, 'Longitude']
+  Latitude = airports_United_Kingdom[codefilter, 'Latitude']
+  return (data.frame(Longitude, Latitude))
+}
+```
+
+* Create departure and arrival locations based on their ```Longitude``` and ```Latitude```
+* In order to do so, apply the ```getCoordinates_United_Kingdom()``` function to all the source and destination airports of United_Kingdom
+
+```{r}
+departure_locations = lapply(as.character(routes_United_Kingdom$SourceAirport), 
+                             getCoordinates_United_Kingdom)
+departure_locations = do.call('rbind', departure_locations)
+departure_locations$group = 1 : dim(departure_locations)[1]
+
+arrival_locations = lapply(as.character(routes_United_Kingdom$DestinationAirport),
+                            getCoordinates_United_Kingdom)
+arrival_locations = do.call('rbind', arrival_locations)
+arrival_locations$group = 1 : dim(arrival_locations)[1]
+
+routes_United_Kingdom_coordinates = rbind(departure_locations, arrival_locations)
+```
+
+* Install ```ggmap```
+```{r, message=FALSE, warning=FALSE}
+#install.packages('ggmap')
+library(ggmap)
+library(ggplot2)
+```
+
+* Copy and paste the function provided in the ```ggmap_extraFunctions.R``` file and create the plot
+
+```{r, eval=FALSE, message=FALSE}
+map_United_Kingdom = ggmap(get_googlemap(center = 'United Kingdom', zoom = 6,
+                                maptype = 'roadmap', color = 'bw'),
+                  extent='device') +
+  geom_path(data = routes_United_Kingdom_coordinates,
+            aes (x = Longitude , y = Latitude , group=group),
+            size = 0.4 , alpha = I(0.05) , color = 'red', na.rm=TRUE) +
+  geom_point(data = airports_United_Kingdom,
+             aes (x = Longitude , y = Latitude),
+             color = '#1565C0' , alpha = I(0.3), na.rm=TRUE)
+print(map_United_Kingdom)
+```
+
+##### Rank the airports according to some metrics (outdegree, betweeness, PageRank)
+* **Outdgree**: Number of edges outgoing from a vertex or node
+* Create a function ```outdegree_United_Kingdom```
+* The function should return the outdegree of an airport given its IATA code
+* Consider only routes in United_Kingdom (```routes_United_Kingdom```)
+* Store the outdegree of the Italian airports in the variable airports_United_Kingdom$Outdegree
+
+```{r}
+outdegree_United_Kingdom = function(iata) {
+  outdegree = sum(routes_United_Kingdom$SourceAirport == iata, na.rm=T) 
+  return (outdegree)
+}
+iata_unique = as.character(unique(airports_United_Kingdom$IATA))
+airports_United_Kingdom$Outdegree = do.call('rbind', lapply(iata_unique, outdegree_United_Kingdom))
+```
+
+* Copy and paste the function provided in the ```ggmap_extraFunctions.R``` file and create the plot
+```{r}
+map_United_Kingdom_outdegree = ggmap(get_googlemap(center = 'United Kingdom',zoom = 6,
+                                          maptype = 'roadmap',
+                                          color = 'bw' ), 
+                            extent = 'device') +
+  geom_path (data = routes_United_Kingdom_coordinates,
+             aes (x = Longitude, y = Latitude, group = group),
+             size = 0.4, alpha = I(0.05), color = 'blue', na.rm=TRUE) +
+  geom_point (data = airports_United_Kingdom,
+              aes ( x = Longitude , y = Latitude, size = Outdegree),
+              color = 'blue' , alpha = I(0.6), na.rm=TRUE)
+
+print(map_United_Kingdom_outdegree)
+```
+
+* **Betweeness**: number of times that a node serves as a bridge along the shortest path between two other nodes
+* Install the ```igraph``` library which contains network analysis and visualization functions
+```{r}
+#install.packages('igraph')
+library('igraph')
+```
+* Build a graph where each airport is a vertex and each route is an edge
+```{r}
+graph_United_Kingdom_vertices = as.character(unique(airports_United_Kingdom$IATA))
+graph_United_Kingdom = graph.empty() + vertices(graph_United_Kingdom_vertices)
+graph_United_Kingdom = graph_United_Kingdom + 
+  edges(as.matrix(routes_United_Kingdom[, c("SourceAirport", "DestinationAirport")]), directed=T)
+```
+* Compute the betweenness for each airport
+```{r}
+United_Kingdom_betweenness = betweenness(graph_United_Kingdom, v=V(graph_United_Kingdom), directed=T)
+United_Kingdom_betweenness = as.matrix(United_Kingdom_betweenness )
+airports_United_Kingdom = merge(airports_United_Kingdom, United_Kingdom_betweenness, by.x="IATA", by.y="row.names")
+colnames(airports_United_Kingdom)[6] = "Betweenness"
+```
+* Copy and paste the function provided in the ```ggmap_extraFunctions.R``` file and create the plot
+```{r}
+map_United_Kingdom_betweenness = (ggmap(get_googlemap(center = 'United_Kingdom', zoom = 6, 
+                                             maptype = 'roadmap', color = 'bw' ), 
+                               extent = 'device') +
+                           geom_path(data = routes_United_Kingdom_coordinates,
+                                     aes ( x = Longitude , y = Latitude , group = group ),
+                                     size = 0.1 , alpha = I(0.05) , color = '#e1dfdf', na.rm=TRUE ) +
+                           geom_point (data = airports_United_Kingdom , 
+                                         aes(x = Longitude, y = Latitude,
+                                             colour = as.vector(Betweenness), size = Outdegree),
+                                       alpha = I(0.8), na.rm=TRUE ) +
+                           guides(colour=guide_colourbar("Betweenness")) +
+                           scale_color_gradientn(guide="colourbar", na.value="black", colours=rainbow(2)))
+
+print(map_United_Kingdom_betweenness)
+```
+
+
+
+
+
+

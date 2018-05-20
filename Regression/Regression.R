@@ -1,0 +1,10 @@
+library(DMwR)
+data(algae)
+algae = algae[-manyNAs(algae)]
+algae_clean = knnImputation(algae, k=10)
+lm_a1 = lm(a1 ~ ., data = algae_clean[, 1:12])
+summary(lm_a1)
+anova(lm_a1)
+lm_a1_2 = update(lm_a1, . ~ . - season)
+anova(lm_a1, lm_a1_2)
+final_lm = step(lm_a1)

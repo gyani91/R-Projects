@@ -1,0 +1,375 @@
+---
+title: "Clustering Texts"
+author: "Sumeet Gyanchandani"
+date: "5/10/2018"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, cache=FALSE, error=FALSE, warning=FALSE)
+```
+
+```{r cars}
+#Clear the environment
+rm(list=ls())
+```
+
+```{r pressure}
+#Loading libraries
+library(tm)
+library(proxy)
+library(RTextTools)
+library(fpc)
+library(wordcloud)
+library(cluster)
+library(stringi)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(tidytext)
+library(data.table)
+library(cluster)
+library(radarchart)
+library(repr)
+```
+
+```{r}
+#Data Pre-processing
+#Enron Emails
+enron_vocab <- read.csv("dataset/vocab.enron.txt", header = FALSE, col.names = c("word"), 
+ stringsAsFactors = FALSE) %>% 
+ mutate(wordID = 1:28102)
+
+enron_words <- read.csv("dataset/docword.enron.txt", header = FALSE, sep = " ", 
+ col.names = c("docID", "wordID", "count"), skip = 3)
+
+enron_words <- merge(enron_words, enron_vocab, by = "wordID") %>% 
+ select(docID, word, count)
+```
+
+```{r}
+#NIPS data
+nips_vocab <- read.csv("dataset/vocab.nips.txt", header = FALSE, col.names = c("word"), 
+ stringsAsFactors = FALSE) %>% 
+ mutate(wordID = 1:12419)
+
+nips_words <- read.csv("dataset/docword.nips.txt", header = FALSE, sep = " ", 
+ col.names = c("docID", "wordID", "count"), skip = 3)
+
+nips_words <- merge(nips_words, nips_vocab, by = "wordID") %>% 
+ select(docID, word, count)
+```
+
+```{r}
+#KOS data
+kos_vocab <- read.csv("dataset/vocab.kos.txt", header = FALSE, col.names = c("word"), 
+ stringsAsFactors = FALSE) %>% 
+ mutate(wordID = 1:6906)
+
+kos_words <- read.csv("dataset/docword.kos.txt", header = FALSE, sep = " ", 
+ col.names = c("docID", "wordID", "count"), skip = 3)
+
+kos_words <- merge(kos_words, kos_vocab, by = "wordID") %>% 
+ select(docID, word, count)
+```
+
+
+```{r}
+#Exploration
+enron_unique_words = aggregate(enron_words['count'], by=enron_words['word'], sum)
+nips_unique_words = aggregate(nips_words['count'], by=nips_words['word'], sum)
+kos_unique_words = aggregate(kos_words['count'], by=kos_words['word'], sum)
+```
+
+```{r}
+enron_top = enron_unique_words[order(enron_unique_words$count,decreasing=T)[1:10],]
+nips_top = nips_unique_words[order(nips_unique_words$count,decreasing=T)[1:10],]
+kos_top = kos_unique_words[order(kos_unique_words$count,decreasing=T)[1:10],]
+```
+
+```{r}
+g <- ggplot(data=enron_top, aes(x=enron_top$word, y=enron_top$count))
+g + geom_bar(stat="identity") + xlab("Words") + ylab("Count") + ggtitle("Top 10 words")
+```
+
+```{r}
+g <- ggplot(data=nips_top, aes(x=nips_top$word, y=nips_top$count))
+g + geom_bar(stat="identity") + xlab("Words") + ylab("Count") + ggtitle("Top 10 words")
+```
+
+```{r}
+g <- ggplot(data=kos_top, aes(x=kos_top$word, y=kos_top$count))
+g + geom_bar(stat="identity") + xlab("Words") + ylab("Count") + ggtitle("Top 10 words")
+```
+
+```{r}
+# Sentiment Analysis
+afinn <- get_sentiments("afinn")
+nrc <- get_sentiments("nrc")
+bing <- get_sentiments("bing")
+```
+
+```{r}
+# enron sentiment based on AFINN lexicon
+enron_afinn <- enron_words %>% 
+ # Inner Join to AFINN lexicon
+ inner_join(afinn, by = c("word" = "word")) %>%
+ # Count by score and document ID
+ count(score, docID)
+
+enron_afinn_agg <- enron_afinn %>% 
+ # Group by line
+ group_by(docID) %>%
+ # Sum scores by line
+ summarize(total_score = sum(score))
+
+ggplot(enron_afinn_agg, aes(docID, total_score)) +
+ geom_smooth()
+```
+
+```{r}
+# enron sentiment based on nrc lexicon
+enron_nrc <- inner_join(enron_words, nrc, by = c("word" = "word"))
+
+# DataFrame of counts
+enron_nrc <- enron_nrc %>% 
+ # group by sentiment
+ group_by(sentiment) %>% 
+ # total count by sentiment
+ summarize(total_count = sum(count))
+
+# Plotting the sentiment counts
+ggplot(enron_nrc, aes(x = sentiment, y = total_count)) +
+ geom_col()
+```
+
+```{r}
+# enron sentiment by bing lexicon
+enron_bing <- enron_words %>%
+ # inner join to the lexicon
+ inner_join(bing, by = c("word" = "word")) %>%
+ # count by sentiment, index
+ count(sentiment, docID) %>%
+ # spreading the sentiments
+ spread(sentiment, n, fill=0) %>%
+ mutate(
+ # adding polarity field
+ polarity = positive - negative,
+ # adding line number field
+ docID = unique(docID)
+ )
+
+# plotting the sentiment
+ggplot(enron_bing, aes(docID, polarity)) + 
+ geom_smooth() +
+ geom_hline(yintercept = 0, color = "red") +
+ ggtitle("Enron Emails Chronological Polarity")
+```
+
+```{r fig1, fig.height = 3, fig.width = 7, fig.align = "center"}
+# enron frequency analysis
+enron_sents <- inner_join(enron_words, bing, by = c("word" = "word"))
+
+# tidy sentiment calculation
+enron_tidy_sentiment <- enron_sents %>% 
+ count(word, sentiment, wt = count) %>%
+ spread(sentiment, n, fill = 0) %>%
+ mutate(polarity = positive - negative)
+
+# subsetting the data for words with high polarity
+enron_tidy_small <- enron_tidy_sentiment %>% 
+ filter(abs(polarity) >= 1000)
+
+# adding polarity
+enron_tidy_pol <- enron_tidy_small %>% 
+ mutate(
+ pol = ifelse(polarity>0, "positive", "negative")
+ )
+
+# plotting the word frequency
+ggplot(
+ enron_tidy_pol, 
+ aes(reorder(word, polarity), polarity, fill = pol)) +
+ geom_bar(stat = "identity") + 
+ ggtitle("Enron Emails: Sentiment Word Frequency") + 
+ theme(axis.text.x = element_text(angle = 90, vjust = -0.1))
+```
+
+```{r}
+# enron emotional introspection
+enron_sentiment <- inner_join(enron_words, nrc)
+
+# dropping positive or negative
+enron_pos_neg <- enron_sentiment %>%
+ filter(!grepl("positive|negative", sentiment))
+
+# counting terms by sentiment then spread 
+enron_tidy <- enron_pos_neg %>% 
+ count(sentiment, term = word) %>% 
+ spread(sentiment, n, fill = 0) %>%
+ as.data.frame()
+
+# setting row names
+rownames(enron_tidy) <- enron_tidy[, 1]
+
+# dropping terms column
+enron_tidy[, 1] <- NULL
+
+# comparison cloud
+comparison.cloud(enron_tidy, max.words = 200, title.size = 1.5)
+```
+
+```{r}
+# enron radarchart
+enron_sentiment <- inner_join(enron_words, nrc)
+
+# dropping positive or negative
+enron_pos_neg <- enron_sentiment %>%
+ filter(!grepl("positive|negative", sentiment))
+
+# tidy count
+enron_tally <- enron_pos_neg %>%
+ group_by(sentiment) %>%
+ tally()
+
+# JavaScript radar chart
+chartJSRadar(enron_tally)
+```
+
+```{r}
+#Document Term Matrix
+enron_dtm <- enron_words %>%
+  cast_dtm(docID, word, count)
+
+nips_dtm <- nips_words %>%
+  cast_dtm(docID, word, count)
+
+kos_dtm <- kos_words %>%
+  cast_dtm(docID, word, count)
+```
+
+```{r}
+inspect(enron_dtm)
+```
+
+```{r}
+inspect(nips_dtm)
+```
+
+```{r}
+inspect(kos_dtm)
+```
+
+```{r}
+#TF-IDF Weighting Scheme
+enron_dtm_tfidf <- weightTfIdf(enron_dtm, normalize = TRUE)
+nips_dtm_tfidf <- weightTfIdf(nips_dtm, normalize = TRUE)
+kos_dtm_tfidf <- weightTfIdf(kos_dtm, normalize = TRUE)
+```
+
+```{r}
+inspect(enron_dtm_tfidf)
+```
+
+```{r}
+inspect(nips_dtm_tfidf)
+```
+
+```{r}
+inspect(kos_dtm_tfidf)
+```
+
+```{r}
+dtm.matrix = as.matrix(enron_dtm_tfidf[1:1000,])
+```
+
+```{r}
+set.seed(142)   
+wordcloud(colnames(dtm.matrix), dtm.matrix[3, ], max.words = 200, rot.per=0.2, colors=brewer.pal(6, "Dark2"))
+```
+
+```{r}
+dtm.matrix = as.matrix(nips_dtm_tfidf[1:1000,])
+```
+
+```{r}
+set.seed(142)   
+wordcloud(colnames(dtm.matrix), dtm.matrix[3, ], max.words = 200, rot.per=0.2, colors=brewer.pal(6, "Dark2"))
+```
+
+```{r}
+dtm.matrix = as.matrix(kos_dtm_tfidf[1:1000,])
+```
+
+```{r}
+set.seed(142)   
+wordcloud(colnames(dtm.matrix), dtm.matrix[3, ], max.words = 200, rot.per=0.2, colors=brewer.pal(6, "Dark2"))
+```
+
+```{r}
+# Distance Matrix using Cosine Measure
+em  <- as.matrix(enron_dtm_tfidf[1:1000,])
+enron_distMatrix <- dist(em, method="cosine")
+```
+
+```{r}
+nm  <- as.matrix(nips_dtm_tfidf[1:20,])
+nips_distMatrix <- dist(nm, method="cosine")
+```
+
+```{r}
+km  <- as.matrix(kos_dtm_tfidf[1:20,])
+kos_distMatrix <- dist(km, method="cosine")
+```
+
+```{r}
+m2  <- as.matrix(enron_dtm_tfidf[1:20,])
+distMatrix2 <- dist(m2, method="cosine")
+```
+
+```{r}
+#Clustering
+#Hierarchical Clustering
+groups <- hclust(distMatrix2, method="ward.D")
+plot(groups, cex=0.9, hang=-1)
+rect.hclust(groups, k=7)
+```
+
+```{r}
+groups <- hclust(nips_distMatrix, method="ward.D")
+plot(groups, cex=0.9, hang=-1)
+rect.hclust(groups, k=3)
+```
+
+```{r}
+groups <- hclust(kos_distMatrix, method="ward.D")
+plot(groups, cex=0.9, hang=-1)
+rect.hclust(groups, k=4)
+```
+
+```{r}
+#K Means Clustering algorithm
+kfit <- kmeans(distMatrix2, 7, nstart=100)
+clusplot(as.matrix(distMatrix2), kfit$cluster, color=T, shade=T, labels=2, lines=0)
+```
+
+```{r}
+kfit <- kmeans(nips_distMatrix, 3, nstart=100)
+clusplot(as.matrix(nips_distMatrix), kfit$cluster, color=T, shade=T, labels=2, lines=0)
+```
+
+```{r}
+kfit <- kmeans(kos_distMatrix, 4, nstart=100)
+clusplot(as.matrix(kos_distMatrix), kfit$cluster, color=T, shade=T, labels=2, lines=0)
+```
+
+```{r}
+#Kmeans 
+#look for “elbow” in plot of summed intra-cluster distances (withinss) as fn of k
+wss <- 2:30
+for (i in 2:30) wss[i] <- sum(kmeans(enron_distMatrix,centers=i,nstart=25)$withinss)
+plot(2:30, wss[2:30], type="b", xlab="Number of Clusters",ylab="Within groups sum of squares")
+```
+
